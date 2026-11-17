@@ -3,7 +3,8 @@ set -eu
 
 root="${HOMEBREW_TAP_ROOT:-$(CDPATH= cd "$(dirname "$0")/.." && pwd)}"
 formula_dir="$root/Formula"
-mkdir -p "$formula_dir"
+cask_dir="$root/Casks"
+mkdir -p "$formula_dir" "$cask_dir"
 
 github_get() {
     url="$1"
@@ -38,12 +39,23 @@ latest_tag() {
         sed -n '1p'
 }
 
+# The newest published release, pre-releases included.
+latest_release_tag() {
+    repo="$1"
+    if [ -n "${HOMEBREW_TAP_FIXTURES_DIR:-}" ]; then
+        latest_tag "$repo"
+        return
+    fi
+
+    github_get "https://api.github.com/repos/$repo/releases?per_page=20" 2>/dev/null |
+        jq -r '[.[] | select(.draft | not)][0].tag_name // empty' || true
+}
+
 download_checksums() {
     repo="$1"
     tag="$2"
     output="$3"
-    prefix="$4"
-    checksum_asset="$prefix-$tag-SHA256SUMS"
+    checksum_asset="$4"
     if [ -n "${HOMEBREW_TAP_FIXTURES_DIR:-}" ]; then
         owner="${repo%%/*}"
         name="${repo#*/}"
@@ -81,7 +93,7 @@ render_sumi_formula() {
     trap 'rm -f "$checksums"' EXIT HUP INT TERM
     # Releases from before the rename to Sumi publish inkstead-writer-* assets,
     # so there is no sumi-*-SHA256SUMS to build from yet. Skip rather than fail.
-    if ! download_checksums "$repo" "$tag" "$checksums" sumi; then
+    if ! download_checksums "$repo" "$tag" "$checksums" "sumi-$tag-SHA256SUMS"; then
         echo "No sumi-named assets for $tag yet; leaving formula unchanged."
         rm -f "$checksums"; trap - EXIT HUP INT TERM
         return
@@ -117,4 +129,52 @@ FORMULA
     echo "Updated Formula/sumi.rb to $tag"
 }
 
+render_purr_cask() {
+    repo="NekoLabStudio/purr"
+    tag="$(latest_release_tag "$repo")"
+    if [ -z "$tag" ]; then
+        echo "No Purr release found; leaving cask unchanged."
+        return
+    fi
+
+    version="${tag#v}"
+    checksums="$(mktemp "${TMPDIR:-/tmp}/purr-checksums.XXXXXX")"
+    trap 'rm -f "$checksums"' EXIT HUP INT TERM
+    download_checksums "$repo" "$tag" "$checksums" "purr-$version-SHA256SUMS"
+
+    editor="purr-$version-macos-editor.zip"
+    editor_sha="$(checksum_for "$checksums" "$editor")"
+    require_checksum "$editor_sha" "$editor"
+
+    cat > "$cask_dir/purr.rb" <<CASK
+cask "purr" do
+  version "$version"
+  sha256 "$editor_sha"
+
+  url "https://github.com/$repo/releases/download/v#{version}/purr-#{version}-macos-editor.zip"
+  name "Purr"
+  desc "Game engine based on Godot"
+  homepage "https://oss.nekolab.studio/purr"
+
+  depends_on arch: :arm64
+  depends_on macos: :ventura
+
+  app "Purr.app"
+  binary "#{appdir}/Purr.app/Contents/MacOS/Purr", target: "purr"
+
+  zap trash: [
+    "~/Library/Application Support/Purr",
+    "~/Library/Caches/Purr",
+    "~/Library/Preferences/studio.nekolab.purr.plist",
+    "~/Library/Saved Application State/studio.nekolab.purr.savedState",
+  ]
+end
+CASK
+
+    rm -f "$checksums"
+    trap - EXIT HUP INT TERM
+    echo "Updated Casks/purr.rb to $tag"
+}
+
 render_sumi_formula
+render_purr_cask
