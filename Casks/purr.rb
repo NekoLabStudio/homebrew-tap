@@ -1,6 +1,6 @@
 cask "purr" do
-  version "0.3.0"
-  sha256 "9cff93ed634a0cc9d82bdeb3531452980dce42831bb5bec5cb00fb195f1381ba"
+  version "0.3.1"
+  sha256 "0dc4a78eb9da6e868bc28f53c828754cc55fd5e370293ceeef496df578d35911"
 
   url "https://github.com/NekoLabStudio/purr/releases/download/v#{version}/purr-#{version}-macos-editor.zip"
   name "Purr"
